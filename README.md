@@ -1,61 +1,251 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+在庫管理システム (Inventory Management System)
+概要
+このアプリケーションは、Laravelフレームワークをベースに構築された在庫管理システムです。
+商品、店舗、在庫の基本的なCRUD（作成、読み取り、更新、削除）機能に加え、売上登録、ダッシュボードでのデータ可視化、AIによる需要予測など、実践的な機能を備えています。
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+主な機能
+認証機能:
 
-## About Laravel
+ユーザー登録、ログイン、ログアウト機能
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+パスワードリセット機能
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+ダッシュボード:
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+売上高や販売数のKPIを期間（今日/今月/今年/カスタム）ごとに表示
 
-## Learning Laravel
+前期間との比較グラフによる売上推移の可視化
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+在庫が発注点を下回った際の「在庫アラート」機能
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+グラフ分析ページ:
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+月別売上、店舗別シェア、商品別売上Top5、曜日別売上などをグラフで詳細に分析可能
 
-## Laravel Sponsors
+在庫管理:
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+在庫情報の一覧、新規登録、編集、削除
 
-### Premium Partners
+商品名や店舗での絞り込み検索機能
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+売上登録:
 
-## Contributing
+在庫一覧から直接、販売数を入力して売上を登録
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+登録時に在庫数が自動で減少
 
-## Code of Conduct
+AI需要予測:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+発注点を下回った在庫に対し、AI（OpenAI APIを利用）が過去の売上データから将来の需要を予測
 
-## Security Vulnerabilities
+予測に基づいた適切な「推奨発注数」を提示
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+マスタ管理:
 
-## License
+商品マスタ管理（一覧、新規登録）
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+ユーザー管理（一覧）
+
+プロフィール管理:
+
+ユーザー自身のプロフィール情報（名前、メールアドレス）の更新
+
+パスワードの変更とアカウントの削除
+
+データベース設計 (ER図)
+このシステムの主要なエンティティ間の関係は以下の通りです。
+
+コード スニペット
+
+erDiagram
+    USERS ||--o{ SALES : "records"
+    STORES ||--o{ INVENTORIES : "has"
+    PRODUCTS ||--o{ INVENTORIES : "is"
+    PRODUCTS ||--o{ SALES : "is sold as"
+    INVENTORIES ||--o{ SALES : "is sold from"
+    INVENTORIES ||--o{ PURCHASE_ORDERS : "is ordered via"
+
+    USERS {
+        int id PK
+        string name
+        string email
+        string password
+    }
+    STORES {
+        int id PK
+        string name
+        string location
+    }
+    PRODUCTS {
+        int id PK
+        string name
+        string description
+        int price
+    }
+    INVENTORIES {
+        int id PK
+        int product_id FK
+        int store_id FK
+        int quantity
+        int reorder_point
+    }
+    SALES {
+        int id PK
+        int inventory_id FK
+        int user_id FK
+        int quantity
+        timestamp sale_date
+    }
+    PURCHASE_ORDERS {
+        int id PK
+        int inventory_id FK
+        int quantity
+        string status
+    }
+USERS: ログインしてシステムを操作するユーザー
+
+STORES: 商品在庫を管理する店舗
+
+PRODUCTS: 管理対象の商品マスタ
+
+INVENTORIES: どの店舗にどの商品が何個あるかを示す在庫テーブル
+
+SALES: 日々の売上記録
+
+PURCHASE_ORDERS: 発注記録
+
+システム依存関係
+本プロジェクトは、主に以下のライブラリやフレームワークに依存しています。
+
+コード スニペット
+
+graph TD
+    subgraph Backend (PHP)
+        Laravel[Laravel Framework]
+        Sail[Laravel Sail]
+        OpenAI[OpenAI PHP Client]
+    end
+
+    subgraph Frontend (JavaScript)
+        Bootstrap[Bootstrap]
+        ChartJS[Chart.js]
+        Vite[Vite]
+    end
+
+    subgraph Development Environment
+        Docker[Docker]
+        MySQL[MySQL]
+    end
+
+    InventorySystem[在庫管理システム] --> Laravel
+    InventorySystem --> Sail
+    InventorySystem --> Bootstrap
+    InventorySystem --> ChartJS
+
+    Laravel --> OpenAI
+    Sail --> Docker
+    Docker --> MySQL
+    Vite --> Bootstrap
+シーケンス図
+1. ユーザーログイン
+コード スニペット
+
+sequenceDiagram
+    participant User as ユーザー
+    participant Browser as ブラウザ
+    participant WebServer as Webサーバー (Laravel)
+    participant Database as データベース
+
+    User->>+Browser: メールアドレスとパスワードを入力しログインボタンをクリック
+    Browser->>+WebServer: POST /login (ログインリクエスト)
+    WebServer->>WebServer: バリデーションチェック
+    WebServer->>+Database: usersテーブルからユーザー情報を検索
+    Database-->>-WebServer: ユーザー情報を返す
+    alt 認証成功
+        WebServer->>WebServer: セッションを開始
+        WebServer-->>-Browser: 302 Redirect to /dashboard
+        Browser->>+User: ダッシュボードを表示
+    else 認証失敗
+        WebServer-->>-Browser: エラーメッセージと共にログイン画面を再表示
+        Browser->>+User: エラーを表示
+    end
+2. 売上登録
+コード スニペット
+
+sequenceDiagram
+    participant User as ユーザー
+    participant Browser as ブラウザ
+    participant WebServer as Webサーバー (Laravel)
+    participant Database as データベース
+
+    User->>+Browser: 在庫一覧画面で販売数を入力し「売上登録」ボタンをクリック
+    Browser->>+WebServer: POST /sales (売上情報)
+    WebServer->>WebServer: SalesController@store を実行
+    WebServer->>+Database: salesテーブルに売上データをINSERT
+    Database-->>-WebServer: 登録成功
+    WebServer->>+Database: inventoriesテーブルの在庫数(quantity)をUPDATE
+    Database-->>-WebServer: 更新成功
+    WebServer-->>-Browser: 302 Redirect to /inventory (在庫一覧へリダイレクト)
+    Browser->>User: 更新された在庫一覧を表示
+使用技術
+バックエンド: Laravel, PHP
+
+データベース: MySQL
+
+フロントエンド: Blade, Bootstrap, Chart.js
+
+AI: OpenAI API
+
+開発環境: Docker (Laravel Sail)
+
+セットアップ手順
+リポジトリをクローン
+
+Bash
+
+git clone https://github.com/taichan-33/inventory-system.git
+cd inventory-system
+環境ファイルの準備
+
+Bash
+
+cp .env.example .env
+Laravel Sailの起動
+
+Bash
+
+./vendor/bin/sail up -d
+依存パッケージのインストール
+
+Bash
+
+./vendor/bin/sail composer install
+./vendor/bin/sail npm install
+アプリケーションキーの生成
+
+Bash
+
+./vendor/bin/sail artisan key:generate
+データベースのマイグレーションと初期データ投入
+
+Bash
+
+./vendor/bin/sail artisan migrate --seed
+フロントエンドアセットのビルド
+
+Bash
+
+./vendor/bin/sail npm run build
+アクセス
+ブラウザで http://localhost にアクセスしてください。
+
+使い方
+ログイン情報:
+
+メールアドレス: exsample@gmail.com
+
+パスワード: test1234
+
+ログイン後、ナビゲーションバーから各機能へアクセスしてください。
+
+AI需要予測は、「AI予測」ページからバッチ処理を実行することで、発注点を下回っている商品の推奨発注数を確認できます。（※事前にOpenAIのAPIキーを.envファイルに設定する必要があります）
