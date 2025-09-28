@@ -3,10 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\Inventory;
+use App\Models\PurchaseOrder;
 use App\Models\Sale;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Carbon\Carbon;
 
 class ForecastController extends Controller
 {
@@ -17,6 +19,12 @@ class ForecastController extends Controller
 
     public function runBatchForecast(Request $request)
     {
+        // 1. 発注済み（未完了）の注文を取得し、検索しやすいように整形
+        $pendingOrders = PurchaseOrder::where('status', '!=', 'completed')
+            ->get()
+            ->keyBy(fn ($item) => $item->product_id . '-' . $item->store_id);
+        
+        // 2. 発注点を下回っている在庫を取得
         $lowStockInventories = Inventory::with(['product', 'store'])
             ->whereColumn('quantity', '<=', 'reorder_point')
             ->get();
@@ -29,13 +37,17 @@ class ForecastController extends Controller
 
         $salesDataString = "";
         foreach ($lowStockInventories as $inventory) {
+            $key = $inventory->product_id . '-' . $inventory->store_id;
+            $pendingQty = $pendingOrders->has($key) ? $pendingOrders[$key]->quantity : 0;
+            
             $sales = Sale::where('product_id', $inventory->product_id)
                 ->where('store_id', $inventory->store_id)
                 ->orderBy('sold_at', 'asc')
-                ->limit(90) // 直近90日分のデータに制限
+                ->limit(90)
                 ->get(['sold_at', 'quantity_sold']);
 
-            $salesDataString .= "--- 商品ID: {$inventory->id}, 商品名: {$inventory->product->name}, 店舗: {$inventory->store->name}, 現在在庫: {$inventory->quantity} ---\n";
+            // 3. AIに渡す情報に「発注済み未入荷数」を追加
+            $salesDataString .= "--- product_id: {$inventory->product_id}, store_id: {$inventory->store_id}, 商品名: {$inventory->product->name}, 店舗: {$inventory->store_name}, 現在在庫: {$inventory->quantity}, 発注済み未入荷数: {$pendingQty} ---\n";
             if ($sales->isEmpty()) {
                 $salesDataString .= "売上データなし\n";
             } else {
@@ -46,7 +58,7 @@ class ForecastController extends Controller
             $salesDataString .= "\n";
         }
 
-        // --- プロンプトをJSON出力要求に最適化 ---
+        // 4. AIへの指示（プロンプト）を更新
         $prompt = "
 あなたは優秀なサプライチェーン・アナリストです。
 以下の複数商品のデータに基づき、需要予測と発注推奨を行ってください。
@@ -54,7 +66,7 @@ class ForecastController extends Controller
 # 前提条件
 - 商品の補充にかかる日数（リードタイム）: 3日
 - 安全在庫は「リードタイム中の平均販売数 + 需要変動を吸収する量」で計算してください。
-- 発注推奨数は「(7日間の予測販売数 + 安全在庫) - 現在の在庫数」を基本とし、マイナスになる場合は0としてください。
+- 発注推奨数は「(7日間の予測販売数 + 安全在庫) - 現在の在庫数 - 発注済み未入荷数」を基本とし、マイナスになる場合は0としてください。
 
 # データ
 {$salesDataString}
@@ -64,6 +76,8 @@ class ForecastController extends Controller
 - ルート要素は `forecasts` というキーを持つオブジェクトとします。
 - `forecasts` の値は、各商品の予測結果オブジェクトを含む配列とします。
 - 各商品オブジェクトには、以下のキーを含めてください。
+  - `product_id`: 商品ID (integer)
+  - `store_id`: 店舗ID (integer)
   - `product_name`: 商品名 (string)
   - `store_name`: 店舗名 (string)
   - `current_stock`: 現在の在庫数 (integer)
@@ -75,14 +89,11 @@ JSON以外の説明文は絶対に含めないでください。
 ";
         
         try {
-            // ユーザー指定のAPIエンドポイントとモデルを使用
             $response = Http::timeout(180)
-                ->withToken(config('openai.api_key')) // .env等での設定を推奨
+                ->withToken(config('openai.api_key'))
                 ->post('https://api.openai.com/v1/responses', [
                     'model' => 'o3-pro-2025-06-10',
-                    'input' => [
-                        ['role' => 'user', 'content' => $prompt],
-                    ],
+                    'input' => [['role' => 'user', 'content' => $prompt]],
                 ]);
 
             if ($response->failed()) {
@@ -93,20 +104,28 @@ JSON以外の説明文は絶対に含めないでください。
             $responseData = $response->json();
             $jsonString = $responseData['output'][1]['content'][0]['text'] ?? null;
             
-            if (!$jsonString) {
-                return back()->withErrors(['api_error' => 'AIからの結果を解析できませんでした。']);
-            }
+            if (!$jsonString) { return back()->withErrors(['api_error' => 'AIからの結果を解析できませんでした。']); }
 
-            // JSON文字列をデコード
             $decodedResult = json_decode($jsonString, true);
             
-            // JSONデコード失敗、または期待する形式でない場合のエラーハンドリング
             if (json_last_error() !== JSON_ERROR_NONE || !isset($decodedResult['forecasts'])) {
                 Log::error('Failed to decode AI JSON response or invalid format: ' . $jsonString);
                 return back()->withErrors(['api_error' => 'AIが予期せぬ形式で応答しました。']);
             }
             
             $result = $decodedResult['forecasts'];
+
+            // 5. ビューに渡す結果に、発注済み情報を追加
+            foreach ($result as &$item) {
+                $key = ($item['product_id'] ?? '') . '-' . ($item['store_id'] ?? '');
+                if ($pendingOrders->has($key)) {
+                    $item['pending_order_quantity'] = $pendingOrders[$key]->quantity;
+                    $item['arrival_date'] = Carbon::parse($pendingOrders[$key]->arrival_date)->format('n/j');
+                } else {
+                    $item['pending_order_quantity'] = 0;
+                    $item['arrival_date'] = null;
+                }
+            }
 
         } catch (\Exception $e) {
             Log::error('AI API connection error: ' . $e->getMessage());
@@ -116,3 +135,4 @@ JSON以外の説明文は絶対に含めないでください。
         return view('forecast.index', compact('result'));
     }
 }
+

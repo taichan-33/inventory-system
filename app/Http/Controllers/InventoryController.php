@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Models\Inventory;
 use App\Models\Product;
 use App\Models\Store;
+use App\Models\PurchaseOrder; 
 
 class InventoryController extends Controller
 {
@@ -33,6 +34,19 @@ class InventoryController extends Controller
         
         // フィルター用の店舗リストを取得
         $stores = Store::all();
+
+        // 1. 発注済み（未完了）の注文を取得
+        $pendingOrders = PurchaseOrder::where('status', '!=', 'completed')
+            ->get()
+            ->keyBy(fn ($item) => $item->product_id . '-' . $item->store_id);
+
+        // 2. ページネーションされた在庫データに、発注済み情報を直接紐付ける
+        $inventories->getCollection()->transform(function ($inventory) use ($pendingOrders) {
+            $key = $inventory->product_id . '-' . $inventory->store_id;
+            // 'pendingOrder' という名前で、発注済み情報をinventoryオブジェクトに追加
+            $inventory->pendingOrder = $pendingOrders->get($key);
+            return $inventory;
+        });
 
         // 絞り込み条件をビューに渡して、入力値を保持する
         return view('inventory.index', [

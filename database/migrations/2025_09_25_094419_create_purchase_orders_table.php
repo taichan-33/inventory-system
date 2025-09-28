@@ -14,8 +14,10 @@ return new class extends Migration
         Schema::create('purchase_orders', function (Blueprint $table) {
             $table->id();
             $table->foreignId('product_id')->constrained();
+            $table->foreignId('store_id')->constrained();
             $table->unsignedInteger('quantity');
             $table->string('status')->default('pending'); // pending, shipping, completed
+            $table->timestamp('arrival_date')->nullable();
             $table->timestamps();
         });
     }

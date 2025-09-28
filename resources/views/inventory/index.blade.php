@@ -52,13 +52,14 @@
 
     <div class="card shadow-sm">
         <div class="card-body">
-            <table class="table table-hover">
+            <table class="table table-hover align-middle">
                 <thead class="table-light">
                     <tr>
-                        <th scope="col">商品名</th>
-                        <th scope="col">店舗名</th>
-                        <th scope="col">在庫数</th>
-                        <th scope="col">操作</th>
+                        <th>商品名</th>
+                        <th>店舗名</th>
+                        <th class="text-center">在庫数</th>
+                        <th class="text-center">ステータス</th>
+                        <th>操作</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -66,7 +67,24 @@
                         <tr>
                             <td>{{ $inventory->product->name }}</td>
                             <td>{{ $inventory->store->name }}</td>
-                            <td>{{ $inventory->quantity }} 個</td>
+                            <td class="text-center fw-bold">{{ $inventory->quantity }} 個</td>
+                            <td class="text-center">
+                                {{-- 【重要】シンプルになった表示ロジック --}}
+                                @if($inventory->pendingOrder)
+                                    {{-- 最優先: 入荷待ち --}}
+                                    <span class="badge bg-info text-dark">
+                                        <i class="bi bi-truck"></i> 入荷待ち ({{ $inventory->pendingOrder->quantity }}個)
+                                        <br>
+                                        <small>{{ \Carbon\Carbon::parse($inventory->pendingOrder->arrival_date)->format('n/j') }} 到着予定</small>
+                                    </span>
+                                @elseif($inventory->quantity <= $inventory->reorder_point)
+                                    {{-- 次点: 要発注 --}}
+                                    <span class="badge bg-warning text-dark">要発注</span>
+                                @else
+                                    {{-- それ以外 --}}
+                                    <span class="badge bg-light text-secondary">---</span>
+                                @endif
+                            </td>
                             <td>
                                 <div class="d-flex align-items-center">
                                     <a href="{{ route('inventory.edit', $inventory) }}" class="btn btn-sm btn-outline-secondary me-2">編集</a>
@@ -85,7 +103,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="4" class="text-center text-muted p-5">
+                            <td colspan="5" class="text-center text-muted p-5">
                                 <p>該当する在庫データはありません。</p>
                                 <a href="{{ route('inventory.index') }}" class="btn btn-sm btn-outline-secondary">検索条件をクリア</a>
                             </td>
@@ -94,7 +112,6 @@
                 </tbody>
             </table>
 
-            {{-- ページネーションリンク --}}
             <div class="d-flex justify-content-center">
                 {{ $inventories->appends(request()->query())->links() }}
             </div>
@@ -102,16 +119,12 @@
     </div>
 </div>
 
+{{-- 削除確認モーダル --}}
 <div class="modal fade" id="deleteModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">削除の確認</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <p>本当にこの在庫情報を削除しますか？この操作は取り消せません。</p>
-            </div>
+            <div class="modal-header"><h5 class="modal-title">削除の確認</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body"><p>本当にこの在庫情報を削除しますか？この操作は取り消せません。</p></div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
                 <form id="deleteForm" method="POST" action="">
@@ -122,17 +135,16 @@
             </div>
         </div>
     </div>
+</div>
 @endsection
 
 @push('scripts')
 <script>
     const deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
     const deleteForm = document.getElementById('deleteForm');
-
     document.querySelectorAll('.delete-btn').forEach(button => {
         button.addEventListener('click', function() {
-            const actionUrl = this.dataset.action;
-            deleteForm.action = actionUrl;
+            deleteForm.action = this.dataset.action;
             deleteModal.show();
         });
     });

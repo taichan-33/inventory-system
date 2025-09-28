@@ -7,7 +7,8 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ForecastController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\UserController;
-use App\Http\Controllers\ProfileController; // ProfileControllerをインポート
+use App\Http\Controllers\ProfileController; 
+use App\Http\Controllers\PurchaseOrderController; 
 
 Route::get('/', function () {
     return view('welcome');
@@ -51,6 +52,9 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/dashboard/sales-details', [DashboardController::class, 'getSalesDetailsForPeriod'])->name('dashboard.salesDetails');
     
     Route::get('/dashboard/analytics', [DashboardController::class, 'analytics'])->name('dashboard.analytics');
+
+    Route::post('/purchase-orders', [PurchaseOrderController::class, 'store'])->name('purchase-orders.store');
+
 });
 
 
