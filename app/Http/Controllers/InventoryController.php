@@ -13,7 +13,7 @@ class InventoryController extends Controller
     //
     public function index(Request $request)
     {
-        // クエリビルダーを初期化
+        // Eloquentクエリビルダーを初期化し、基本的なリレーションを読み込む
         $query = Inventory::with(['product', 'store']);
 
         // --- フィルター機能 ---
@@ -23,37 +23,67 @@ class InventoryController extends Controller
                 $q->where('name', 'like', '%' . $request->product_name . '%');
             });
         }
-
         // 2. 店舗による絞り込み
         if ($request->filled('store_id')) {
             $query->where('store_id', $request->store_id);
         }
 
-        // データを25件ごとにページネーション
-        $inventories = $query->paginate(25);
+        // --- ステータスによる絞り込み ---
+        $statusFilter = $request->input('status');
+        if ($statusFilter) {
+            if ($statusFilter === 'pending') {
+                // 「入荷待ち」の商品を検索
+                $query->whereHas('pendingPurchaseOrder');
+            } elseif ($statusFilter === 'reorder') {
+                // 「要発注」の商品を検索 (発注点を下回り、かつ入荷待ちでない)
+                $query->whereColumn('quantity', '<=', 'reorder_point')
+                      ->whereDoesntHave('pendingPurchaseOrder');
+            } elseif ($statusFilter === 'in_stock') {
+                // 「在庫あり」の商品を検索 (発注点を上回っている)
+                $query->whereColumn('quantity', '>', 'reorder_point');
+            }
+        }
+
+        // ページネーションを適用して、メインの在庫データを取得
+        $inventories = $query->latest()->paginate(25);
+        
+        // --- 発注済み情報の紐付け（最重要ロジック） ---
+        // ページに表示されている在庫に対応する「入荷待ち」注文のみを取得
+        if ($inventories->isNotEmpty()) {
+            // 1. ページ上の在庫データから、検索キーのリストを作成
+            $inventoryKeys = $inventories->map(function ($inventory) {
+                return ['product_id' => $inventory->product_id, 'store_id' => $inventory->store_id];
+            });
+
+            // 2. 作成したキーリストを使い、関連する入荷待ち注文だけを一度のクエリで効率的に取得
+            $pendingOrdersQuery = PurchaseOrder::where('status', '!=', 'completed');
+            $pendingOrdersQuery->where(function ($query) use ($inventoryKeys) {
+                foreach ($inventoryKeys as $key) {
+                    $query->orWhere(function ($q) use ($key) {
+                        $q->where('product_id', $key['product_id'])
+                          ->where('store_id', $key['store_id']);
+                    });
+                }
+            });
+            $pendingOrders = $pendingOrdersQuery->get()->keyBy(fn($item) => $item->product_id . '-' . $item->store_id);
+
+            // 3. 各在庫データに、対応する入荷待ち情報をプロパティとして動的に追加
+            $inventories->each(function ($inventory) use ($pendingOrders) {
+                $key = $inventory->product_id . '-' . $inventory->store_id;
+                $inventory->pendingPurchaseOrder = $pendingOrders->get($key);
+            });
+        }
         
         // フィルター用の店舗リストを取得
         $stores = Store::all();
 
-        // 1. 発注済み（未完了）の注文を取得
-        $pendingOrders = PurchaseOrder::where('status', '!=', 'completed')
-            ->get()
-            ->keyBy(fn ($item) => $item->product_id . '-' . $item->store_id);
-
-        // 2. ページネーションされた在庫データに、発注済み情報を直接紐付ける
-        $inventories->getCollection()->transform(function ($inventory) use ($pendingOrders) {
-            $key = $inventory->product_id . '-' . $inventory->store_id;
-            // 'pendingOrder' という名前で、発注済み情報をinventoryオブジェクトに追加
-            $inventory->pendingOrder = $pendingOrders->get($key);
-            return $inventory;
-        });
-
-        // 絞り込み条件をビューに渡して、入力値を保持する
+        // 全てのデータをビューに渡す
         return view('inventory.index', [
             'inventories' => $inventories,
             'stores' => $stores,
-            'product_name' => $request->product_name,
-            'store_id' => $request->store_id,
+            'product_name' => $request->input('product_name'),
+            'store_id' => $request->input('store_id'),
+            'status' => $statusFilter,
         ]);
     }
 

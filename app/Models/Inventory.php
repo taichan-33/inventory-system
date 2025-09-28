@@ -9,11 +9,6 @@ class Inventory extends Model
 {
     use HasFactory;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array
-     */
     protected $fillable = [
         'product_id',
         'store_id',
@@ -25,9 +20,6 @@ class Inventory extends Model
         return $this->belongsTo(Product::class);
     }
 
-    /**
-     * この在庫が属する店舗を取得
-     */
     public function store()
     {
         return $this->belongsTo(Store::class);

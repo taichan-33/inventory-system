@@ -12,12 +12,12 @@
         <div class="card-body">
             <form method="GET" action="{{ route('inventory.index') }}">
                 <div class="row g-3 align-items-end">
-                    <div class="col-md-5">
-                        <label for="product_name" class="form-label">商品名で検索</label>
+                    <div class="col-md-4">
+                        <label for="product_name" class="form-label">商品名</label>
                         <input type="text" name="product_name" id="product_name" class="form-control" value="{{ $product_name ?? '' }}" placeholder="商品名の一部を入力">
                     </div>
-                    <div class="col-md-5">
-                        <label for="store_id" class="form-label">店舗で絞り込み</label>
+                    <div class="col-md-3">
+                        <label for="store_id" class="form-label">店舗</label>
                         <select name="store_id" id="store_id" class="form-select">
                             <option value="">すべての店舗</option>
                             @foreach ($stores as $store)
@@ -25,6 +25,16 @@
                                     {{ $store->name }}
                                 </option>
                             @endforeach
+                        </select>
+                    </div>
+                    {{-- ステータスフィルターを追加 --}}
+                    <div class="col-md-3">
+                        <label for="status" class="form-label">ステータス</label>
+                        <select name="status" id="status" class="form-select">
+                            <option value="">すべて</option>
+                            <option value="in_stock" {{ (isset($status) && $status == 'in_stock') ? 'selected' : '' }}>在庫あり</option>
+                            <option value="reorder" {{ (isset($status) && $status == 'reorder') ? 'selected' : '' }}>要発注</option>
+                            <option value="pending" {{ (isset($status) && $status == 'pending') ? 'selected' : '' }}>入荷待ち</option>
                         </select>
                     </div>
                     <div class="col-md-2 d-grid">
@@ -69,20 +79,20 @@
                             <td>{{ $inventory->store->name }}</td>
                             <td class="text-center fw-bold">{{ $inventory->quantity }} 個</td>
                             <td class="text-center">
-                                {{-- 【重要】シンプルになった表示ロジック --}}
-                                @if($inventory->pendingOrder)
+                                {{-- コントローラーで紐付けた `pendingPurchaseOrder` を使って判定 --}}
+                                @if($inventory->pendingPurchaseOrder)
                                     {{-- 最優先: 入荷待ち --}}
                                     <span class="badge bg-info text-dark">
-                                        <i class="bi bi-truck"></i> 入荷待ち ({{ $inventory->pendingOrder->quantity }}個)
+                                        <i class="bi bi-truck"></i> 入荷待ち ({{ $inventory->pendingPurchaseOrder->quantity }}個)
                                         <br>
-                                        <small>{{ \Carbon\Carbon::parse($inventory->pendingOrder->arrival_date)->format('n/j') }} 到着予定</small>
+                                        <small>{{ \Carbon\Carbon::parse($inventory->pendingPurchaseOrder->arrival_date)->format('n/j') }} 到着予定</small>
                                     </span>
                                 @elseif($inventory->quantity <= $inventory->reorder_point)
                                     {{-- 次点: 要発注 --}}
                                     <span class="badge bg-warning text-dark">要発注</span>
                                 @else
-                                    {{-- それ以外 --}}
-                                    <span class="badge bg-light text-secondary">---</span>
+                                    {{-- それ以外: 在庫あり --}}
+                                    <span class="badge bg-success text-white">在庫あり</span>
                                 @endif
                             </td>
                             <td>
@@ -112,7 +122,9 @@
                 </tbody>
             </table>
 
+            {{-- ページネーションリンク --}}
             <div class="d-flex justify-content-center">
+                {{-- 検索条件を維持したままページ遷移する --}}
                 {{ $inventories->appends(request()->query())->links() }}
             </div>
         </div>
@@ -120,11 +132,16 @@
 </div>
 
 {{-- 削除確認モーダル --}}
-<div class="modal fade" id="deleteModal" tabindex="-1">
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
-            <div class="modal-header"><h5 class="modal-title">削除の確認</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-            <div class="modal-body"><p>本当にこの在庫情報を削除しますか？この操作は取り消せません。</p></div>
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteModalLabel">削除の確認</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>本当にこの在庫情報を削除しますか？この操作は取り消せません。</p>
+            </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
                 <form id="deleteForm" method="POST" action="">
@@ -144,9 +161,11 @@
     const deleteForm = document.getElementById('deleteForm');
     document.querySelectorAll('.delete-btn').forEach(button => {
         button.addEventListener('click', function() {
-            deleteForm.action = this.dataset.action;
+            const actionUrl = this.dataset.action;
+            deleteForm.action = actionUrl;
             deleteModal.show();
         });
     });
 </script>
 @endpush
+
