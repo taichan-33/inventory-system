@@ -6,9 +6,13 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 use App\Models\Inventory;
+use App\Models\PurchaseOrder;
 
 class DashboardController extends Controller
 {
+    /**
+     * メインダッシュボードの表示
+     */
     public function index(Request $request)
     {
         // --- 期間設定 ---
@@ -72,15 +76,20 @@ class DashboardController extends Controller
         $previousQuantity = $kpiQuery($previousPeriod)->sum('quantity_sold');
         $quantityChange = $previousQuantity > 0 ? (($currentQuantity - $previousQuantity) / $previousQuantity) * 100 : 0;
         
-        // --- 在庫アラート (変更なし) ---
+        // --- 在庫アラート ---
+        $pendingOrders = PurchaseOrder::where('status', '!=', 'completed')->get()->keyBy(fn ($item) => $item->product_id . '-' . $item->store_id);
         $lowStockItems = Inventory::with(['product', 'store'])->whereColumn('quantity', '<=', 'reorder_point')->orderBy('quantity', 'asc')->get();
+        foreach ($lowStockItems as $item) {
+            $key = $item->product_id . '-' . $item->store_id;
+            $item->pendingOrder = $pendingOrders->get($key);
+        }
             
         // --- ドリルダウン用 詳細売上データ ---
         $detailedSales = $this->getDetailedSalesQuery($currentPeriod, $currentRange)->paginate(10);
 
         // --- グラフ用データ ---
         $comparisonChartData = null;
-        if ($currentRange === 'all') { // 今年 vs 昨年 (月別)
+        if ($currentRange === 'all') {
             $currentData = $this->getChartDataByMonth($currentPeriod);
             $previousData = $this->getChartDataByMonth($previousPeriod);
             $labels = collect($currentData)->pluck('month')->map(fn($m) => $m . '月');
@@ -91,7 +100,7 @@ class DashboardController extends Controller
                     ['label' => '昨年', 'data' => collect($previousData)->pluck('total_revenue'), 'borderColor' => '#6c757d', 'backgroundColor' => 'rgba(108, 117, 125, 0.1)'],
                 ]
             ];
-        } elseif (in_array($currentRange, ['month', 'custom', 'today'])) { // 日別比較
+        } elseif (in_array($currentRange, ['month', 'custom', 'today'])) {
             $currentData = $this->getChartDataByDay($currentPeriod);
             $previousData = $this->getChartDataByDay($previousPeriod);
             $labels = collect($currentData)->pluck('day')->map(fn($d) => Carbon::parse($d)->format('j'));
@@ -111,10 +120,11 @@ class DashboardController extends Controller
         ));
     }
     
-    // --- グラフ分析ページ用メソッド ---
+    /**
+     * グラフ分析ページの表示
+     */
     public function analytics(Request $request)
     {
-        // 期間設定ロジックを index と共有
         $currentRange = $request->query('range', 'month');
         $startDate = $request->query('start_date');
         $endDate = $request->query('end_date');
@@ -144,9 +154,7 @@ class DashboardController extends Controller
                     break;
             }
         }
-        $dateFilter = fn($query) => $query->whereBetween('sales.sold_at', $currentPeriod);
 
-        // ... (グラフデータ取得ロジックは前回から変更なし) ...
         $monthlySalesChart = DB::table('sales')->join('products', 'sales.product_id', '=', 'products.id')->select(DB::raw("DATE_FORMAT(sold_at, '%Y-%m') as month"), DB::raw("SUM(quantity_sold * price) as total_revenue"))->where('sold_at', '>=', Carbon::now()->subMonths(11)->startOfMonth())->groupBy('month')->orderBy('month', 'asc')->get();
         $storeShareChart = DB::table('sales')->join('stores', 'sales.store_id', '=', 'stores.id')->join('products', 'sales.product_id', '=', 'products.id')->select('stores.name', DB::raw('SUM(quantity_sold * price) as total_revenue'))->whereBetween('sales.sold_at', $currentPeriod)->groupBy('stores.name')->orderByDesc('total_revenue')->get();
         $productSalesChart = DB::table('sales')->join('products', 'sales.product_id', '=', 'products.id')->select('products.name', DB::raw('SUM(quantity_sold * price) as total_revenue'))->whereBetween('sales.sold_at', $currentPeriod)->groupBy('products.name')->orderByDesc('total_revenue')->limit(5)->get();
@@ -157,15 +165,16 @@ class DashboardController extends Controller
         return view('dashboard.analytics', compact('monthlySalesChart', 'storeShareChart', 'productSalesChart', 'dayOfWeekData', 'currentRange', 'dateRangeLabel', 'startDate', 'endDate'));
     }
 
-    // --- AJAXで詳細データを返すメソッド (カスタム期間対応) ---
+    /**
+     * AJAXで詳細売上データを取得
+     */
     public function getSalesDetailsForPeriod(Request $request)
     {
         $period = $request->query('period');
         $range = $request->query('range');
         $query = DB::table('sales')->join('products', 'sales.product_id', '=', 'products.id')->select('products.name', DB::raw('SUM(quantity_sold) as total_quantity'), DB::raw('SUM(quantity_sold * price) as total_revenue'))->groupBy('products.name')->orderByDesc('total_revenue');
         
-        // 'custom'の場合も日別詳細と同じ扱いにする
-        if ($range === 'all' && strlen($period) == 7) {
+        if (($range === 'all' || $range === 'custom') && strlen($period) === 7) {
             $query->whereYear('sold_at', substr($period, 0, 4))->whereMonth('sold_at', substr($period, 5, 2));
         } else {
             $query->whereDate('sold_at', $period);
@@ -173,23 +182,31 @@ class DashboardController extends Controller
         return response()->json($query->get());
     }
 
-    // --- データ取得ヘルパーメソッド ---
+    /**
+     * ヘルパー：詳細売上クエリ
+     */
     private function getDetailedSalesQuery($period, $range)
     {
         $query = DB::table('sales')->join('products', 'sales.product_id', '=', 'products.id');
-        if ($range === 'all') { // 月別
+        if ($range === 'all') {
             $query->select(DB::raw("DATE_FORMAT(sold_at, '%Y-%m') as period"), DB::raw("SUM(quantity_sold) as total_quantity"), DB::raw("SUM(quantity_sold * price) as total_revenue"))->whereBetween('sold_at', $period);
-        } else { // 日別
+        } else {
             $query->select(DB::raw("DATE(sold_at) as period"), DB::raw("SUM(quantity_sold) as total_quantity"), DB::raw("SUM(quantity_sold * price) as total_revenue"))->whereBetween('sold_at', $period);
         }
         return $query->groupBy('period')->orderBy('period', 'desc');
     }
 
+    /**
+     * ヘルパー：月別グラフデータ
+     */
     private function getChartDataByMonth($period) {
         $data = DB::table('sales')->join('products', 'sales.product_id', '=', 'products.id')->select(DB::raw("MONTH(sold_at) as month"), DB::raw("SUM(quantity_sold * price) as total_revenue"))->whereBetween('sold_at', $period)->groupBy('month')->orderBy('month', 'asc')->get()->keyBy('month');
         $result = []; for ($i = 1; $i <= 12; $i++) { $result[] = ['month' => $i, 'total_revenue' => $data->has($i) ? $data[$i]->total_revenue : 0]; } return $result;
     }
 
+    /**
+     * ヘルパー：日別グラフデータ
+     */
     private function getChartDataByDay($period) {
         $data = DB::table('sales')->join('products', 'sales.product_id', '=', 'products.id')->select(DB::raw("DATE(sold_at) as day"), DB::raw("SUM(quantity_sold * price) as total_revenue"))->whereBetween('sold_at', $period)->groupBy('day')->orderBy('day', 'asc')->get()->keyBy('day');
         $result = []; $date = $period[0]->copy();
