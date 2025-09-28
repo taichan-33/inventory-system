@@ -24,4 +24,11 @@ class Inventory extends Model
     {
         return $this->belongsTo(Store::class);
     }
+
+    public function pendingPurchaseOrder()
+    {
+        return $this->hasOne(PurchaseOrder::class, 'product_id', 'product_id')
+                    ->whereColumn('purchase_orders.store_id', 'inventories.store_id')
+                    ->where('status', '!=', 'completed');
+    }
 }
